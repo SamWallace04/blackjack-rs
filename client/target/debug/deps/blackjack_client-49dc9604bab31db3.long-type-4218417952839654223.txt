@@ -1,0 +1,1 @@
+FlatMap<std::ops::Range<u8>, FlatMap<std::ops::Range<u32>, Map<std::ops::Range<u32>, {closure@src/game.rs:35:29: 35:37}>, {closure@src/game.rs:34:29: 34:32}>, {closure@src/game.rs:33:19: 33:23}>
