@@ -1,7 +1,12 @@
+use blackjack_shared::card::Card;
+use blackjack_shared::helpers::{rank_from_int, suit_from_int};
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 
-pub fn draw_cards(deck: &mut Vec<Card>, num_to_draw: u16) -> Vec<Card> {
+pub fn draw_cards(num_to_draw: u16) -> Vec<Card> {
+    // The state of the deck is somewhat irrelevant for blackjack games so create a new one each
+    // time.
+    let mut deck = create_playing_deck(1);
     let mut cards: Vec<Card> = Vec::new();
     let mut num = num_to_draw;
 
@@ -24,8 +29,8 @@ pub fn create_playing_deck(num_of_decks: u8) -> Vec<Card> {
         .flat_map(|_d| {
             (0..4).flat_map(|s| {
                 (0..13).map(move |r| Card {
-                    rank: Rank::from_int(r),
-                    suit: Suit::from_int(s),
+                    rank: rank_from_int(r),
+                    suit: suit_from_int(s),
                 })
             })
         })

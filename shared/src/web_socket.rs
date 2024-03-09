@@ -1,62 +1,68 @@
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-};
+use std::io::{Read, Write};
 
-use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
+use serde::{Deserialize, Serialize};
+use tungstenite::{Message, WebSocket};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum WebSocketAction {
     Send,
     Close,
     None,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RequestCommand {
+    Start,
+    StartTurn,
+    Action,
+    End,
+    Info,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketRequest {
     pub action: WebSocketAction,
+    pub command: RequestCommand,
     pub message: String,
 }
 
-impl WebSocketRequest {
-    pub fn new(action: WebSocketAction, message: String) -> WebSocketRequest {
-        WebSocketRequest { action, message }
-    }
-
-    pub fn send_request<S>(&self, socket: &mut WebSocket<S>)
-    where
-        S: Read + Write,
-    {
-        match self.action {
-            WebSocketAction::Send => socket
-                .send(Message::Text(self.message.to_owned().into()))
-                .unwrap(),
-            WebSocketAction::Close => socket
-                .close(None)
-                .unwrap_or_else(|error| println!("{}", error)),
-            WebSocketAction::None => {}
-        };
-    }
-
-    pub fn send_request_and_wait_for_response<S>(&self, socket: &mut WebSocket<S>) -> String
-    where
-        S: Read + Write,
-    {
-        self.send_request(socket);
-
-        let resp;
-
-        loop {
-            let msg = socket.read().expect("Error reading message");
-            if msg.is_text() {
-                match msg {
-                    msg @ Message::Text(_) => resp = msg.into_text().unwrap(),
-                    Message::Close(_) => resp = "CLOSE".to_string(),
-                    _ => resp = String::new(),
-                };
-                break;
-            }
+pub fn send_request<S>(request: WebSocketRequest, socket: &mut WebSocket<S>)
+where
+    S: Read + Write,
+{
+    match request.action {
+        WebSocketAction::Send => {
+            let json = serde_json::to_string(&request).unwrap();
+            socket.send(Message::Text(json)).unwrap()
         }
-        resp
+        WebSocketAction::Close => socket
+            .close(None)
+            .unwrap_or_else(|error| println!("{}", error)),
+        WebSocketAction::None => {}
+    };
+}
+
+pub fn send_request_and_wait_for_response<S>(
+    request: WebSocketRequest,
+    socket: &mut WebSocket<S>,
+) -> String
+where
+    S: Read + Write,
+{
+    send_request(request, socket);
+
+    let resp;
+
+    loop {
+        let msg = socket.read().expect("Error reading message");
+        if msg.is_text() {
+            match msg {
+                msg @ Message::Text(_) => resp = msg.into_text().unwrap(),
+                Message::Close(_) => resp = "CLOSE".to_string(),
+                _ => resp = String::new(),
+            };
+            break;
+        }
     }
+    resp
 }

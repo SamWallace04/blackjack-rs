@@ -1,14 +1,15 @@
+mod card;
 mod thread_pool;
 
+use core::panic;
 use std::net::TcpListener;
 
 use color_eyre::eyre::Result;
 
-use crate::thread_pool::*;
+use crate::{card::draw_cards, thread_pool::*};
 use blackjack_shared::{
-    card::Card,
-    helpers::{rank_from_int, suit_from_int},
-    web_socket::{WebSocketAction, WebSocketRequest},
+    player::{Player, PlayerType},
+    web_socket::*,
 };
 
 use tungstenite::{accept, Message};
@@ -18,18 +19,28 @@ fn main() -> Result<()> {
     let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
     let pool = ThreadPool::new(8);
 
+    let mut handles = vec![];
+
     for stream in listener.incoming() {
         if let Ok(stream) = stream {
             println!("Incoming connection.");
 
-            pool.execute(move || {
+            let handle = pool.execute(move || {
+                // First time initialisation.
                 let mut web_socket = accept(stream).unwrap();
 
-                loop {
-                    let msg = web_socket.read().unwrap();
-                    let resp = handle_connection(msg);
+                let player = Player {
+                    player_type: PlayerType::Human,
+                    hand: draw_cards(2),
+                    hand_value: 0,
+                    chips: 500,
+                    current_bet: 0,
+                };
 
-                    resp.send_request(&mut web_socket);
+                loop {
+                    // The main loop for handling the connection and communication.
+                    let msg = web_socket.read().unwrap();
+                    let resp = handle_message(msg);
 
                     if resp.action == WebSocketAction::Close {
                         web_socket.close(None).unwrap_or_else(|err| {
@@ -37,8 +48,12 @@ fn main() -> Result<()> {
                         });
                         break;
                     }
+
+                    send_request(resp, &mut web_socket);
                 }
             });
+
+            handles.push(handle);
         } else {
             println!("Unsuccessful connection made.");
         }
@@ -48,22 +63,32 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_connection(msg: Message) -> WebSocketRequest {
+fn handle_message(msg: Message) -> WebSocketRequest {
     println!("Recieved message {}", msg);
     match msg {
         msg @ Message::Text(_) => {
             let text = msg.into_text().unwrap();
-            WebSocketRequest {
-                action: WebSocketAction::Send,
-                message: text,
+            let request: WebSocketRequest =
+                serde_json::from_str(&text).expect("Request to be of type WebSocketRequest");
+
+            match request.command {
+                //TODO: Return the player object.
+                RequestCommand::Start => WebSocketRequest {
+                    action: WebSocketAction::Send,
+                    command: RequestCommand::Info,
+                    message: request.message,
+                },
+                _ => panic!(),
             }
         }
         Message::Close(_) => WebSocketRequest {
             action: WebSocketAction::Close,
+            command: RequestCommand::Info,
             message: String::new(),
         },
         _ => WebSocketRequest {
             action: WebSocketAction::None,
+            command: RequestCommand::Info,
             message: String::new(),
         },
     }
