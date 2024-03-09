@@ -1,29 +1,28 @@
+use blackjack_shared::web_socket::{WebSocketAction, WebSocketRequest};
 use color_eyre::eyre::Result;
-use tungstenite::{connect, Message};
+use tungstenite::connect;
 use url::Url;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let (mut socket, response) =
+    let (mut socket, _) =
         connect(Url::parse("ws://localhost:7878/socket").unwrap()).expect("Can't connect");
 
     println!("Connected to the server");
-    println!("Response HTTP code: {}", response.status());
 
-    socket
-        .send(Message::Text("Hello WebSocket".into()))
-        .unwrap();
-    let msg = socket.read().expect("Error reading message");
-    println!("Received: {}", msg);
+    let req = WebSocketRequest::new(WebSocketAction::Send, "Hello".to_string());
 
-    socket.send(Message::Text("bye".into())).unwrap();
+    let res = req.send_request_and_wait_for_response(&mut socket);
+    println!("res: {}", res);
 
-    let new_msg = socket.read().unwrap();
-    println!("new msg {}", new_msg);
+    let new_req = WebSocketRequest::new(WebSocketAction::Send, "World!".to_string());
 
-    socket.close(None).unwrap();
-    socket.flush().unwrap();
+    let res2 = new_req.send_request_and_wait_for_response(&mut socket);
+    println!("res2: {}", res2);
 
+    let close = WebSocketRequest::new(WebSocketAction::Close, String::new());
+
+    close.send_request(&mut socket);
     Ok(())
 }

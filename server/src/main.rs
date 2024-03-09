@@ -1,15 +1,14 @@
 mod thread_pool;
-mod web_socket;
 
 use std::net::TcpListener;
 
 use color_eyre::eyre::Result;
 
 use crate::thread_pool::*;
-use crate::web_socket::*;
 use blackjack_shared::{
     card::Card,
     helpers::{rank_from_int, suit_from_int},
+    web_socket::{WebSocketAction, WebSocketRequest},
 };
 
 use tungstenite::{accept, Message};
@@ -30,18 +29,13 @@ fn main() -> Result<()> {
                     let msg = web_socket.read().unwrap();
                     let resp = handle_connection(msg);
 
-                    match resp.action {
-                        WebSocketAction::Send => {
-                            web_socket.send(Message::Text(resp.response)).unwrap();
-                        }
-                        WebSocketAction::Close => {
-                            println!("Closing");
-                            web_socket.close(None).unwrap_or_else(|error| {
-                                println!("{}", error);
-                            });
-                            break;
-                        }
-                        WebSocketAction::None => {}
+                    resp.send_request(&mut web_socket);
+
+                    if resp.action == WebSocketAction::Close {
+                        web_socket.close(None).unwrap_or_else(|err| {
+                            println!("{}", err);
+                        });
+                        break;
                     }
                 }
             });
@@ -54,23 +48,23 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn handle_connection(msg: Message) -> WebSocketResponse {
+fn handle_connection(msg: Message) -> WebSocketRequest {
     println!("Recieved message {}", msg);
     match msg {
         msg @ Message::Text(_) => {
             let text = msg.into_text().unwrap();
-            WebSocketResponse {
+            WebSocketRequest {
                 action: WebSocketAction::Send,
-                response: text,
+                message: text,
             }
         }
-        Message::Close(_) => WebSocketResponse {
+        Message::Close(_) => WebSocketRequest {
             action: WebSocketAction::Close,
-            response: String::new(),
+            message: String::new(),
         },
-        _ => WebSocketResponse {
+        _ => WebSocketRequest {
             action: WebSocketAction::None,
-            response: String::new(),
+            message: String::new(),
         },
     }
 }
