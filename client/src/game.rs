@@ -1,5 +1,5 @@
-use crate::card::*;
-use crate::player::*;
+use blackjack_shared::card::*;
+use blackjack_shared::player::*;
 
 pub fn start_game() {
     let mut deck = create_playing_deck(1);
