@@ -2,7 +2,7 @@ use crate::card::*;
 use crate::player::*;
 
 pub fn start_game() {
-    let mut deck = create_playing_deck(1);
+    let mut deck = create_playing_deck(4);
 
     let mut dealer = Player {
         player_type: PlayerType::Dealer,
@@ -121,7 +121,7 @@ fn calculate_end_state(players: &mut Vec<Player>, dealer: &mut Player) {
                 player.current_bet * 3
             );
             end_state = EndState::Blackjack;
-        } else if dealer_value > 21 || (player_value < 21 && player_value > dealer_value) {
+        } else if dealer_value > 21 || (player_value <= 21 && player_value > dealer_value) {
             println!("Congrats, you won {} chips.", player.current_bet);
             end_state = EndState::Win;
         } else {

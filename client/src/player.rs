@@ -33,7 +33,7 @@ pub fn bet(chips: u32) -> u32 {
             .expect("Failed to read the bet.");
 
         if let Ok(input_num) = input.trim().parse::<u32>() {
-            if input_num < chips {
+            if input_num <= chips {
                 break input_num;
             }
             println!("You don't have enough chips to cover that bet!");
