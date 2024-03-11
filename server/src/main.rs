@@ -1,98 +1,91 @@
 mod card;
+mod client;
+mod handlers;
 mod thread_pool;
 
-use core::panic;
-use std::net::TcpListener;
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::*;
+use tokio::sync::Mutex;
+use warp::Filter;
 
-use crate::{card::draw_cards, thread_pool::*};
-use blackjack_shared::{
-    player::{Player, PlayerType},
-    web_socket::*,
-};
+use crate::client::Client;
 
-use tungstenite::{accept, Message};
+type Clients = Arc<Mutex<HashMap<String, Client>>>;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     color_eyre::install()?;
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
-    let pool = ThreadPool::new(8);
 
-    let mut handles = vec![];
+    let clients: Clients = Arc::new(Mutex::new(HashMap::new()));
 
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
-            println!("Incoming connection.");
+    let register = warp::path("register");
+    let register_routes = register
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_clients(clients.clone()))
+        .and_then(handlers::register_handler)
+        .or(register
+            .and(warp::delete())
+            .and(warp::path::param())
+            .and(with_clients(clients.clone()))
+            .and_then(handlers::unregister_handler));
 
-            let handle = pool.execute(move || {
-                // First time initialisation.
-                let mut web_socket = accept(stream).unwrap();
+    // let publish = warp::path!("publish")
+    //     .and(warp::body::json())
+    //     .and(with_clients(clients.clone()))
+    //     .and_then(handlers::publish_handler);
 
-                let player = Player {
-                    player_type: PlayerType::Human,
-                    hand: draw_cards(2),
-                    hand_value: 0,
-                    chips: 500,
-                    current_bet: 0,
-                };
+    let ws_route = warp::path("ws")
+        .and(warp::ws())
+        .and(warp::path::param())
+        .and(with_clients(clients.clone()))
+        .and_then(handlers::ws_handler);
 
-                loop {
-                    // The main loop for handling the connection and communication.
-                    let msg = web_socket.read().unwrap();
-                    let resp = handle_message(msg);
+    let routes = ws_route
+        //.or(publish)
+        .or(register_routes)
+        .with(warp::cors().allow_any_origin());
 
-                    if resp.action == WebSocketAction::Close {
-                        web_socket.close(None).unwrap_or_else(|err| {
-                            println!("{}", err);
-                        });
-                        break;
-                    }
+    warp::serve(routes).run(([127, 0, 0, 1], 8000)).await;
 
-                    send_request(resp, &mut web_socket);
-                }
-            });
-
-            handles.push(handle);
-        } else {
-            println!("Unsuccessful connection made.");
-        }
-    }
-
-    drop(listener);
     Ok(())
 }
 
-fn handle_message(msg: Message) -> WebSocketRequest {
-    println!("Recieved message {}", msg);
-    match msg {
-        msg @ Message::Text(_) => {
-            let text = msg.into_text().unwrap();
-            let request: WebSocketRequest =
-                serde_json::from_str(&text).expect("Request to be of type WebSocketRequest");
-
-            match request.command {
-                //TODO: Return the player object.
-                RequestCommand::Start => WebSocketRequest {
-                    action: WebSocketAction::Send,
-                    command: RequestCommand::Info,
-                    message: request.message,
-                },
-                _ => panic!(),
-            }
-        }
-        Message::Close(_) => WebSocketRequest {
-            action: WebSocketAction::Close,
-            command: RequestCommand::Info,
-            message: String::new(),
-        },
-        _ => WebSocketRequest {
-            action: WebSocketAction::None,
-            command: RequestCommand::Info,
-            message: String::new(),
-        },
-    }
+fn with_clients(clients: Clients) -> impl Filter<Extract = (Clients,), Error = Infallible> + Clone {
+    warp::any().map(move || clients.clone())
 }
+
+// fn handle_message(msg: Message) -> WebSocketRequest {
+//     println!("Recieved message {}", msg);
+//     match msg {
+//         msg @ Message::Text(_) => {
+//             let text = msg.into_text().unwrap();
+//             let request: WebSocketRequest =
+//                 serde_json::from_str(&text).expect("Request to be of type WebSocketRequest");
+//
+//             match request.command {
+//                 //TODO: Return the player object.
+//                 RequestCommand::Start => WebSocketRequest {
+//                     action: WebSocketAction::Send,
+//                     command: RequestCommand::Info,
+//                     message: request.message,
+//                 },
+//                 _ => panic!(),
+//             }
+//         }
+//         Message::Close(_) => WebSocketRequest {
+//             action: WebSocketAction::Close,
+//             command: RequestCommand::Info,
+//             message: String::new(),
+//         },
+//         _ => WebSocketRequest {
+//             action: WebSocketAction::None,
+//             command: RequestCommand::Info,
+//             message: String::new(),
+//         },
+//     }
+// }
 
 // loop {
 //     let buf_reader = BufReader::new(&mut stream);
