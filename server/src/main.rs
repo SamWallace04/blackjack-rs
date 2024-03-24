@@ -1,7 +1,6 @@
 mod card;
 mod client;
 mod handlers;
-mod thread_pool;
 
 use std::{convert::Infallible, sync::Arc};
 
