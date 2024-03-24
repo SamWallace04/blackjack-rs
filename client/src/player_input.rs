@@ -1,3 +1,17 @@
+use std::io;
+
+use blackjack_shared::player::PlayerAction;
+
+pub fn get_user_input() -> String {
+    let mut input = String::new();
+
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read the input.");
+
+    input.trim().to_lowercase()
+}
+
 pub fn bet(chips: u32) -> u32 {
     println!("You have {} chips.", chips);
     println!("Place your bet: ");
@@ -19,6 +33,7 @@ pub fn bet(chips: u32) -> u32 {
             println!("Please enter a vaild number: ")
         }
     };
+    println!("");
     bet
 }
 
@@ -26,7 +41,7 @@ pub fn get_player_action() -> PlayerAction {
     loop {
         let mut input = String::new();
 
-        stdin()
+        io::stdin()
             .read_line(&mut input)
             .expect("Could not read the input");
 
@@ -38,5 +53,6 @@ pub fn get_player_action() -> PlayerAction {
             "double" => return PlayerAction::Double,
             _ => println!("Move not recognised. Please enter a vaild move:"),
         };
+        println!("");
     }
 }

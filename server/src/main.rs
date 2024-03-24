@@ -3,7 +3,7 @@ mod client;
 mod handlers;
 mod thread_pool;
 
-use std::{collections::HashMap, convert::Infallible, sync::Arc};
+use std::{convert::Infallible, sync::Arc};
 
 use color_eyre::eyre::*;
 use tokio::sync::Mutex;
@@ -11,13 +11,13 @@ use warp::Filter;
 
 use crate::client::Client;
 
-type Clients = Arc<Mutex<HashMap<String, Client>>>;
+type Clients = Arc<Mutex<Vec<Client>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let clients: Clients = Arc::new(Mutex::new(HashMap::new()));
+    let clients: Clients = Arc::new(Mutex::new(vec![]));
 
     let register = warp::path("register");
     let register_routes = register
@@ -31,10 +31,10 @@ async fn main() -> Result<()> {
             .and(with_clients(clients.clone()))
             .and_then(handlers::unregister_handler));
 
-    // let publish = warp::path!("publish")
-    //     .and(warp::body::json())
-    //     .and(with_clients(clients.clone()))
-    //     .and_then(handlers::publish_handler);
+    let publish = warp::path!("publish")
+        .and(warp::body::json())
+        .and(with_clients(clients.clone()))
+        .and_then(handlers::publish_handler);
 
     let ws_route = warp::path("ws")
         .and(warp::ws())
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
         .and_then(handlers::ws_handler);
 
     let routes = ws_route
-        //.or(publish)
+        .or(publish)
         .or(register_routes)
         .with(warp::cors().allow_any_origin());
 
