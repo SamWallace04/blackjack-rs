@@ -8,8 +8,8 @@ use warp::{
     ws::{Message, WebSocket},
 };
 
-use crate::{client::Client, Clients};
-use blackjack_shared::web_socket::*;
+use crate::{card::draw_cards, client::Client, Clients};
+use blackjack_shared::{card::Card, web_socket::*};
 
 pub async fn register_handler(
     body: RegisterRequest,
@@ -109,11 +109,25 @@ pub async fn publish_handler(
     body: PublishRequest,
     clients: Clients,
 ) -> Result<impl Reply, Rejection> {
+    publish(body, clients, None).await
+}
+
+async fn publish(
+    body: PublishRequest,
+    clients: Clients,
+    filter_client_id: Option<String>,
+) -> Result<impl Reply, Rejection> {
     println!(
         "Attempting to publish message {}",
         serde_json::to_string(&body).unwrap()
     );
     clients.lock().await.iter_mut().for_each(|client| {
+        if let Some(filter) = &filter_client_id {
+            if client.id == *filter {
+                return;
+            }
+        }
+
         if let Some(sender) = &client.sender {
             println!("Sending message to {}", client.user_name);
             let _ = sender.send(Ok(Message::text(serde_json::to_string(&body).unwrap())));
@@ -154,7 +168,7 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
                         user_name: client.user_name.clone(),
                     },
                 };
-                let _ = publish_handler(pub_req, clients).await;
+                let _ = publish(pub_req, clients, None).await;
                 //TODO: Start the game.
             }
             RequestCommand::EndTurn => {
@@ -174,10 +188,16 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
                     };
                     // Make sure the lock gets dropped before calling the publish handler.
                     drop(lock);
-                    let _ = publish_handler(req, clients).await;
+                    let _ = publish(req, clients, None).await;
                 } else {
                     println!("No next client found");
                 }
+            }
+            RequestCommand::DrawCards(n) => {
+                draw_cards_and_publish(n, client.clone(), clients.clone()).await;
+            }
+            RequestCommand::Hit => {
+                draw_cards_and_publish(1, client.clone(), clients.clone()).await;
             }
             _ => {}
         };
@@ -187,6 +207,18 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
         };
 
         let _ = sender.send(Ok(Message::text(serde_json::to_string(&resp).unwrap())));
+    }
+
+    async fn draw_cards_and_publish(n: u16, client: Client, clients: Clients) -> Vec<Card> {
+        let drawn_cards = draw_cards(n);
+        let pub_req = PublishRequest {
+            trigger: PublishTrigger::CardsDrawn {
+                cards: drawn_cards.clone(),
+            },
+        };
+        let _ = publish(pub_req, clients, None).await;
+
+        drawn_cards
     }
 
     // let mut locked = clients.lock().await;

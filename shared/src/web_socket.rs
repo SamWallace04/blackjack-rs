@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::card::Card;
+
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct RegisterRequest {
     pub user_name: String,
@@ -18,7 +20,9 @@ pub enum PublishTrigger {
         active_client_id: String,
         user_name: String,
     },
-    CardDrawn,
+    CardsDrawn {
+        cards: Vec<Card>,
+    },
     TurnEnded,
     GameFinished,
 }
@@ -27,7 +31,10 @@ pub enum PublishTrigger {
 pub enum RequestCommand {
     Start,
     StartTurn,
-    Action,
+    DrawCards(u16),
+    Hit,
+    Stand,
+    Double,
     EndTurn,
     Info,
     Close,

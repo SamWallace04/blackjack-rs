@@ -18,7 +18,7 @@ pub fn rank_from_int(a: u32) -> Rank {
     }
 }
 
-pub fn rank_get_value(rank: Rank) -> u32 {
+pub fn get_rank_value(rank: Rank) -> u32 {
     match rank {
         Rank::Two => 2,
         Rank::Three => 3,

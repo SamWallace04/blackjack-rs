@@ -34,6 +34,18 @@ where
     resp
 }
 
+pub fn send_request_and_discard_response<S>(request: BlackjackRequest, socket: &mut WebSocket<S>)
+where
+    S: Read + Write,
+{
+    send_request(request, socket);
+
+    loop {
+        wait_for_message(socket);
+        break;
+    }
+}
+
 pub fn wait_for_message<S>(socket: &mut WebSocket<S>) -> Message
 where
     S: Read + Write,
@@ -46,23 +58,4 @@ where
         }
     }
     msg
-}
-
-fn wait_for_start_message<S>(socket: &mut WebSocket<S>)
-where
-    S: Read + Write,
-{
-    loop {
-        let msg = wait_for_message(socket);
-        match msg {
-            msg @ Message::Text(_) => {
-                let req: BlackjackRequest =
-                    serde_json::from_str(msg.into_text().unwrap().as_str()).unwrap();
-                if req.command == RequestCommand::Start {
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
 }

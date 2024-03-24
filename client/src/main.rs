@@ -1,9 +1,8 @@
+mod game;
 mod player_input;
 mod web_socket;
 
-use std::{thread, time::Duration};
-
-use crate::{player_input::get_user_input, web_socket::*};
+use crate::{game::*, player_input::*, web_socket::*};
 
 use blackjack_shared::web_socket::*;
 use color_eyre::eyre::Result;
@@ -40,6 +39,7 @@ async fn main() -> Result<()> {
             println!("You are the host. Enter 'start' to begin the game.");
             let input = get_user_input();
             if input == "start" {
+                // TODO: Can all the publish requests be done via ws???
                 http_client
                     .post("http://127.0.0.1:8000/publish")
                     .json(&PublishRequest {
@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
     loop {
         println!("Waiting for our turn...");
         let message = wait_for_message(&mut socket);
-        println!("Message: {}", message.clone().into_text().unwrap());
+        // TODO: Better handle none publish messages.
         let request: PublishRequest = serde_json::from_str(message.into_text().unwrap().as_str())?;
 
         match request.trigger {
@@ -77,29 +77,25 @@ async fn main() -> Result<()> {
                 current_player_name = user_name.clone();
                 if active_client_id.to_lowercase() == client_id.to_lowercase() {
                     println!("It's our turn!");
-                    break;
+                    start_turn(&mut socket);
                 }
                 println!("It's {}'s turn.", current_player_name);
             }
-            PublishTrigger::CardDrawn => {
-                println!("A card has been drawn by {}.", current_player_name);
+            PublishTrigger::CardsDrawn { cards } => {
+                // TODO: Keep track of other players.
+                print!("{} drew the following card(s): ", current_player_name);
+                print_cards_in_hand(cards, None);
+                println!("");
+            }
+            PublishTrigger::GameFinished => {
+                println!("The game has finished.");
+                break;
             }
             _ => {
                 println!("It's not our turn yet.");
             }
         }
     }
-
-    println!("Waiting");
-    thread::sleep(Duration::from_secs(5));
-
-    send_request(
-        BlackjackRequest {
-            command: RequestCommand::EndTurn,
-            message: None,
-        },
-        &mut socket,
-    );
 
     // let req = BlackjackRequest {
     //     command: RequestCommand::Start,
