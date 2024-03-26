@@ -24,7 +24,7 @@ pub fn bet(chips: u32) -> u32 {
             .expect("Failed to read the bet.");
 
         if let Ok(input_num) = input.trim().parse::<u32>() {
-            if input_num < chips {
+            if input_num <= chips {
                 break input_num;
             }
             println!("You don't have enough chips to cover that bet!");
@@ -33,7 +33,7 @@ pub fn bet(chips: u32) -> u32 {
             println!("Please enter a vaild number: ")
         }
     };
-    println!("");
+    println!();
     bet
 }
 
@@ -47,12 +47,12 @@ pub fn get_player_action() -> PlayerAction {
 
         let trimmed_input = input.trim().to_lowercase();
 
-        let _ = match trimmed_input.as_str() {
+        match trimmed_input.as_str() {
             "hit" => return PlayerAction::Hit,
             "stand" => return PlayerAction::Stand,
             "double" => return PlayerAction::Double,
             _ => println!("Move not recognised. Please enter a vaild move:"),
         };
-        println!("");
+        println!();
     }
 }

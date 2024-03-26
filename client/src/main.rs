@@ -4,7 +4,10 @@ mod web_socket;
 
 use crate::{game::*, player_input::*, web_socket::*};
 
-use blackjack_shared::web_socket::*;
+use blackjack_shared::{
+    player::{Player, PlayerType},
+    web_socket::*,
+};
 use color_eyre::eyre::Result;
 use tungstenite::connect;
 use url::Url;
@@ -39,17 +42,10 @@ async fn main() -> Result<()> {
             println!("You are the host. Enter 'start' to begin the game.");
             let input = get_user_input();
             if input == "start" {
-                // TODO: Can all the publish requests be done via ws???
-                http_client
-                    .post("http://127.0.0.1:8000/publish")
-                    .json(&PublishRequest {
-                        trigger: PublishTrigger::StartTurn {
-                            active_client_id: client_id.clone(),
-                            user_name: my_user_name.clone(),
-                        },
-                    })
-                    .send()
-                    .await?;
+                let req = BlackjackRequest {
+                    command: RequestCommand::Start,
+                };
+                send_request(req, &mut socket);
                 break;
             }
         }
@@ -59,68 +55,82 @@ async fn main() -> Result<()> {
     }
 
     println!("The game is starting.");
+
+    let mut me = Player {
+        user_name: my_user_name.clone(),
+        player_type: PlayerType::Human,
+        hand: vec![],
+        hand_value: 0,
+        chips: 500,
+        current_bet: 0,
+    };
+
     //Check the start response. If the username matches ours then start the game.
     //Otherwise wait in a loop checking messages and updating the output as required.
     //Once a start message with our name has been send start playing the game.
     let mut current_player_name = String::new();
     loop {
-        println!("Waiting for our turn...");
-        let message = wait_for_message(&mut socket);
         // TODO: Better handle none publish messages.
+        let message = wait_for_message(&mut socket);
         let request: PublishRequest = serde_json::from_str(message.into_text().unwrap().as_str())?;
 
         match request.trigger {
             PublishTrigger::StartTurn {
                 active_client_id,
                 user_name,
+                dealer_card,
             } => {
                 current_player_name = user_name.clone();
                 if active_client_id.to_lowercase() == client_id.to_lowercase() {
-                    println!("It's our turn!");
-                    start_turn(&mut socket);
+                    println!();
+                    println!("It's your turn!");
+                    // TODO: The chips and bet amounts are not shared across clients.
+                    start_turn(&mut socket, &mut me, dealer_card.unwrap());
+                } else {
+                    println!("It's {}'s turn.", current_player_name);
+                    println!("Waiting for our turn...");
                 }
-                println!("It's {}'s turn.", current_player_name);
             }
             PublishTrigger::CardsDrawn { cards } => {
                 // TODO: Keep track of other players.
                 print!("{} drew the following card(s): ", current_player_name);
                 print_cards_in_hand(cards, None);
-                println!("");
+                println!();
+            }
+            PublishTrigger::RoundFinished(results) => {
+                println!("The round has finished.");
+                println!();
+                for result in results {
+                    if result.player.player_type == PlayerType::Dealer {
+                        println!("The dealer's hand is: ");
+                        print_cards_in_hand(result.player.hand, None);
+                        println!("The dealer's hand value is: {}", result.player.hand_value);
+                        println!();
+                    } else if result.player.user_name.to_lowercase() == my_user_name.to_lowercase()
+                    {
+                        me = result.player.clone();
+                        handle_bets(&me, &result.end_state, true);
+                        me.current_bet = 0;
+                    } else {
+                        handle_bets(&result.player, &result.end_state, false);
+                    }
+                }
+
+                // Start the next round.
+                // If the game is over the server will let all clients know.
+                if res.is_host {
+                    let req = BlackjackRequest {
+                        command: RequestCommand::Start,
+                    };
+                    send_request(req, &mut socket);
+                }
             }
             PublishTrigger::GameFinished => {
                 println!("The game has finished.");
                 break;
             }
-            _ => {
-                println!("It's not our turn yet.");
-            }
         }
     }
 
-    // let req = BlackjackRequest {
-    //     command: RequestCommand::Start,
-    //     message: "Hello".to_string(),
-    // };
-    //
-    // let res = send_request_and_wait_for_response(req, &mut socket);
-    // println!("res: {}", res);
-    //
-    // let new_req = BlackjackRequest {
-    //     command: RequestCommand::Start,
-    //     message: "World!".to_string(),
-    // };
-    //
-    // let res2 = send_request_and_wait_for_response(new_req, &mut socket);
-    // println!("res2: {}", res2);
-    //
-    let close_req = BlackjackRequest {
-        command: RequestCommand::Close,
-        message: None,
-    };
-
-    send_request(close_req, &mut socket);
-
-    //TODO: Run the game locally broadcasting the cards that are drawn?
-    //Otherwise send a request per action and broadcast the result? <----
     Ok(())
 }

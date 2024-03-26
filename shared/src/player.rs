@@ -1,16 +1,19 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     card::{Card, Rank},
     helpers::get_rank_value,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PlayerType {
     Human,
     Dealer,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Player {
+    pub user_name: String,
     pub player_type: PlayerType,
     pub hand: Vec<Card>,
     pub hand_value: u32,
@@ -28,16 +31,14 @@ pub enum PlayerAction {
 pub fn get_hand_value(hand: Vec<Card>) -> u32 {
     let mut values = vec![];
 
-    for i in 0..hand.len() {
+    (0..hand.len()).for_each(|i| {
         values.push(get_rank_value(hand[i].rank.clone()));
-    }
+    });
 
     let mut value = values.into_iter().sum();
 
-    if hand.into_iter().any(|c| c.rank == Rank::Ace) {
-        if value > 21 {
-            value -= 10;
-        }
+    if hand.into_iter().any(|c| c.rank == Rank::Ace) && value > 21 {
+        value -= 10;
     }
 
     value

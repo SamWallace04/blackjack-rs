@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::card::Card;
+use crate::{card::Card, player::Player};
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct RegisterRequest {
@@ -19,34 +19,45 @@ pub enum PublishTrigger {
     StartTurn {
         active_client_id: String,
         user_name: String,
+        dealer_card: Option<Card>,
     },
     CardsDrawn {
         cards: Vec<Card>,
     },
-    TurnEnded,
+    // TODO: Add the dealer into the results for the clients.
+    RoundFinished(Vec<TurnResult>),
     GameFinished,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum RequestCommand {
     Start,
-    StartTurn,
+    Bet(u32),
     DrawCards(u16),
     Hit,
-    Stand,
-    Double,
-    EndTurn,
-    Info,
-    Close,
+    EndTurn(Player),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlackjackRequest {
     pub command: RequestCommand,
-    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PublishRequest {
     pub trigger: PublishTrigger,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TurnResult {
+    pub player: Player,
+    pub end_state: EndState,
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub enum EndState {
+    Win,
+    Loss,
+    Blackjack,
+    Push,
 }

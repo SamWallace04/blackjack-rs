@@ -20,29 +20,12 @@ where
 {
     send_request(request, socket);
 
-    let resp;
+    let msg = wait_for_message(socket);
 
-    loop {
-        let msg = wait_for_message(socket);
-        match msg {
-            msg @ Message::Text(_) => resp = msg.into_text().unwrap(),
-            Message::Close(_) => resp = "CLOSE".to_string(),
-            _ => resp = String::new(),
-        };
-        break;
-    }
-    resp
-}
-
-pub fn send_request_and_discard_response<S>(request: BlackjackRequest, socket: &mut WebSocket<S>)
-where
-    S: Read + Write,
-{
-    send_request(request, socket);
-
-    loop {
-        wait_for_message(socket);
-        break;
+    match msg {
+        msg @ Message::Text(_) => msg.into_text().unwrap(),
+        Message::Close(_) => "CLOSE".to_string(),
+        _ => String::new(),
     }
 }
 

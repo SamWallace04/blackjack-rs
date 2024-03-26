@@ -8,8 +8,17 @@ use warp::{
     ws::{Message, WebSocket},
 };
 
-use crate::{card::draw_cards, client::Client, Clients};
-use blackjack_shared::{card::Card, web_socket::*};
+use crate::{
+    card::draw_cards,
+    client::Client,
+    game::{calculate_end_state, handle_end_state, take_dealers_turn},
+    Clients, Dealer,
+};
+use blackjack_shared::{
+    card::Card,
+    player::{get_hand_value, Player, PlayerType},
+    web_socket::*,
+};
 
 pub async fn register_handler(
     body: RegisterRequest,
@@ -31,12 +40,18 @@ pub async fn register_handler(
 
 async fn register_client(id: String, user_name: String, clients: Clients) {
     let position = clients.lock().await.len();
-    println!("position: {}", position);
     clients.lock().await.push(Client {
         id,
-        user_name,
         sender: None,
         position,
+        player: Player {
+            user_name,
+            player_type: PlayerType::Human,
+            hand: vec![],
+            hand_value: 0,
+            chips: 500,
+            current_bet: 0,
+        },
     });
 }
 
@@ -49,16 +64,17 @@ pub async fn ws_handler(
     ws: warp::ws::Ws,
     id: String,
     clients: Clients,
+    dealer: Dealer,
 ) -> Result<impl Reply, Rejection> {
     let lock = clients.lock().await.clone();
-    let client = lock.iter().find(|c| c.id == id).clone();
+    let client = lock.iter().find(|c| c.id == id);
     match client {
-        Some(_) => Ok(ws.on_upgrade(move |socket| client_connection(socket, id, clients))),
+        Some(_) => Ok(ws.on_upgrade(move |socket| client_connection(socket, id, clients, dealer))),
         None => Err(warp::reject::not_found()),
     }
 }
 
-pub async fn client_connection(ws: WebSocket, id: String, clients: Clients) {
+pub async fn client_connection(ws: WebSocket, id: String, clients: Clients, dealer: Dealer) {
     let (client_ws_sender, mut client_ws_rcv) = ws.split();
     let (client_sender, client_rcv) = mpsc::unbounded_channel();
 
@@ -98,7 +114,7 @@ pub async fn client_connection(ws: WebSocket, id: String, clients: Clients) {
                 break;
             }
         };
-        handle_client_msg(&id, msg, clients.clone(), client.clone()).await;
+        handle_client_msg(&id, msg, clients.clone(), client.clone(), dealer.clone()).await;
     }
 
     clients.lock().await.retain(|c| c.id != id);
@@ -129,7 +145,7 @@ async fn publish(
         }
 
         if let Some(sender) = &client.sender {
-            println!("Sending message to {}", client.user_name);
+            println!("Sending message to {}", client.player.user_name);
             let _ = sender.send(Ok(Message::text(serde_json::to_string(&body).unwrap())));
         }
     });
@@ -138,7 +154,13 @@ async fn publish(
     Ok(warp::http::StatusCode::OK)
 }
 
-async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Client) {
+async fn handle_client_msg(
+    id: &str,
+    msg: Message,
+    clients: Clients,
+    mut client: Client,
+    dealer: Dealer,
+) {
     println!("received message from {}: {:?}", id, msg);
     let message = match msg.to_str() {
         Ok(v) => v,
@@ -149,7 +171,7 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
         return;
     }
 
-    let req: BlackjackRequest = match serde_json::from_str(&message) {
+    let req: BlackjackRequest = match serde_json::from_str(message) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("error while parsing message to request: {}", e);
@@ -158,59 +180,128 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
     };
 
     //TODO: Split out each arm into a function.
-    if let Some(sender) = &client.sender {
+    if let Some(_sender) = &client.sender {
         match req.command {
             RequestCommand::Start => {
+                let dealer_cards = draw_cards(2);
+                let mut dealer_lock = dealer.lock().await;
+
+                dealer_lock.hand = dealer_cards.clone();
+                dealer_lock.hand_value = get_hand_value(dealer_cards.clone());
+                drop(dealer_lock);
+
                 let pub_req = PublishRequest {
-                    // TODO: Move the id value into the trigger enum.
                     trigger: PublishTrigger::StartTurn {
-                        active_client_id: client.id,
-                        user_name: client.user_name.clone(),
+                        active_client_id: client.id.clone(),
+                        user_name: client.player.user_name.clone(),
+                        dealer_card: Some(dealer.lock().await.hand[0].clone()),
                     },
                 };
+
                 let _ = publish(pub_req, clients, None).await;
-                //TODO: Start the game.
             }
-            RequestCommand::EndTurn => {
+            RequestCommand::Bet(amount) => {
+                let mut clients_lock = clients.lock().await;
+                let client_mut = clients_lock.iter_mut().find(|c| c.id == id).unwrap();
+                client_mut.player.current_bet = amount;
+                // TODO: Publish the bet amount to all clients.
+            }
+            RequestCommand::EndTurn(player) => {
+                client.player = player.clone();
+
                 let lock = clients.lock().await;
                 let next_client = lock
                     .iter()
                     // TODO: This will break if someone leaves. Probably ok for this.
-                    .find(|c| c.position == client.position + 1)
-                    .clone();
+                    .find(|c| c.position == client.position + 1);
 
                 if let Some(c) = next_client {
                     let req = PublishRequest {
                         trigger: PublishTrigger::StartTurn {
                             active_client_id: c.id.clone(),
-                            user_name: c.user_name.clone(),
+                            user_name: c.player.user_name.clone(),
+                            dealer_card: Some(dealer.lock().await.hand[0].clone()),
                         },
                     };
                     // Make sure the lock gets dropped before calling the publish handler.
                     drop(lock);
                     let _ = publish(req, clients, None).await;
                 } else {
-                    println!("No next client found");
+                    drop(lock);
+                    // If we can't find any more clients then all players have finished.
+                    println!("No next client found, ending round.");
+
+                    // Play the dealer's turn.
+                    take_dealers_turn(&dealer).await;
+
+                    // End the game.
+                    let mut results = vec![];
+                    let mut clients_lock = clients.lock().await;
+                    let mut continue_playing = false;
+
+                    results.push(TurnResult {
+                        player: dealer.lock().await.clone(),
+                        end_state: EndState::Push, // Result for dealer is irrelevent.
+                    });
+
+                    for c in clients_lock.iter_mut() {
+                        // Calculate the end state for each player.
+                        println!("Calculating end state for {}", c.id);
+                        let end_state = calculate_end_state(&c.player, &dealer).await;
+
+                        handle_end_state(&mut c.player, end_state.clone());
+
+                        c.player.hand = vec![];
+                        c.player.hand_value = 0;
+
+                        results.push(TurnResult {
+                            player: c.player.clone(),
+                            end_state: end_state.clone(),
+                        });
+
+                        println!("Result: {:?}", end_state);
+                        // Keep playing until everyone is out of chips.
+                        if c.player.chips > 0 {
+                            continue_playing = true;
+                        }
+                    }
+
+                    drop(clients_lock);
+
+                    let pub_req = PublishRequest {
+                        trigger: PublishTrigger::RoundFinished(results),
+                    };
+
+                    let _ = publish(pub_req, clients.clone(), None).await;
+
+                    if !continue_playing {
+                        let pub_req = PublishRequest {
+                            trigger: PublishTrigger::GameFinished,
+                        };
+
+                        let _ = publish(pub_req, clients.clone(), None).await;
+                    }
                 }
             }
             RequestCommand::DrawCards(n) => {
-                draw_cards_and_publish(n, client.clone(), clients.clone()).await;
+                draw_cards_and_publish(n, clients.clone(), client).await;
             }
             RequestCommand::Hit => {
-                draw_cards_and_publish(1, client.clone(), clients.clone()).await;
+                draw_cards_and_publish(1, clients.clone(), client).await;
             }
-            _ => {}
         };
-        let resp = BlackjackRequest {
-            command: RequestCommand::Info,
-            message: req.message,
-        };
-
-        let _ = sender.send(Ok(Message::text(serde_json::to_string(&resp).unwrap())));
     }
 
-    async fn draw_cards_and_publish(n: u16, client: Client, clients: Clients) -> Vec<Card> {
+    async fn draw_cards_and_publish(n: u16, clients: Clients, client: Client) -> Vec<Card> {
+        let mut clients_lock = clients.lock().await;
+        let client_mut = clients_lock.iter_mut().find(|c| c.id == client.id).unwrap();
+
         let drawn_cards = draw_cards(n);
+        client_mut.player.hand.extend(drawn_cards.clone());
+        client_mut.player.hand_value = get_hand_value(client_mut.player.hand.clone());
+
+        drop(clients_lock);
+
         let pub_req = PublishRequest {
             trigger: PublishTrigger::CardsDrawn {
                 cards: drawn_cards.clone(),
@@ -220,12 +311,4 @@ async fn handle_client_msg(id: &str, msg: Message, clients: Clients, client: Cli
 
         drawn_cards
     }
-
-    // let mut locked = clients.lock().await;
-    // match locked.get_mut(id) {
-    //     Some(v) => {
-    //         v.topics = topics_req.topics;
-    //     }
-    //     None => return,
-    // };
 }
