@@ -1,24 +1,15 @@
-use std::io::{self, stdin};
+use std::io;
 
-use crate::card::Card;
+use blackjack_shared::player::PlayerAction;
 
-pub enum PlayerType {
-    Human,
-    Dealer,
-}
+pub fn get_user_input() -> String {
+    let mut input = String::new();
 
-pub struct Player {
-    pub player_type: PlayerType,
-    pub hand: Vec<Card>,
-    pub hand_value: u32,
-    pub chips: u32,
-    pub current_bet: u32,
-}
+    io::stdin()
+        .read_line(&mut input)
+        .expect("Failed to read the input.");
 
-pub enum PlayerAction {
-    Hit,
-    Stand,
-    Double,
+    input.trim().to_lowercase()
 }
 
 pub fn bet(chips: u32) -> u32 {
@@ -33,7 +24,7 @@ pub fn bet(chips: u32) -> u32 {
             .expect("Failed to read the bet.");
 
         if let Ok(input_num) = input.trim().parse::<u32>() {
-            if input_num < chips {
+            if input_num <= chips {
                 break input_num;
             }
             println!("You don't have enough chips to cover that bet!");
@@ -42,6 +33,7 @@ pub fn bet(chips: u32) -> u32 {
             println!("Please enter a vaild number: ")
         }
     };
+    println!();
     bet
 }
 
@@ -49,17 +41,18 @@ pub fn get_player_action() -> PlayerAction {
     loop {
         let mut input = String::new();
 
-        stdin()
+        io::stdin()
             .read_line(&mut input)
             .expect("Could not read the input");
 
         let trimmed_input = input.trim().to_lowercase();
 
-        let _ = match trimmed_input.as_str() {
+        match trimmed_input.as_str() {
             "hit" => return PlayerAction::Hit,
             "stand" => return PlayerAction::Stand,
             "double" => return PlayerAction::Double,
             _ => println!("Move not recognised. Please enter a vaild move:"),
         };
+        println!();
     }
 }

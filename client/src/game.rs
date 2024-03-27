@@ -1,192 +1,160 @@
-use crate::card::*;
-use crate::player::*;
+use std::{io::Read, io::Write};
 
-pub fn start_game() {
-    let mut deck = create_playing_deck(1);
+use blackjack_shared::player::{get_hand_value, PlayerAction};
+use blackjack_shared::web_socket::*;
+use blackjack_shared::{card::Card, player::Player};
+use tungstenite::WebSocket;
 
-    let mut dealer = Player {
-        player_type: PlayerType::Dealer,
-        hand: draw_cards(&mut deck, 2),
-        hand_value: 0,
-        chips: 0,
-        current_bet: 0,
+use crate::*;
+
+pub fn start_turn<S>(socket: &mut WebSocket<S>, me: &mut Player, dealer_card: Card)
+where
+    S: Read + Write,
+{
+    let draw_req = BlackjackRequest {
+        command: RequestCommand::DrawCards(2),
     };
 
-    let me = Player {
-        player_type: PlayerType::Human,
-        hand: draw_cards(&mut deck, 2),
-        hand_value: 0,
-        chips: 500,
-        current_bet: 0,
+    me.current_bet = bet(me.chips);
+
+    send_request(
+        BlackjackRequest {
+            command: RequestCommand::Bet(me.current_bet),
+        },
+        socket,
+    );
+
+    let draw_res = send_request_and_wait_for_response(draw_req, socket);
+
+    let drawn_cards = handle_draw_cards(draw_res.as_str());
+
+    me.hand = drawn_cards.clone();
+
+    print!("You drew the following card(s): ");
+    print_cards_in_hand(drawn_cards.clone(), None);
+    println!();
+
+    println!("Your hand value is: {}", get_hand_value(me.hand.clone()));
+
+    println!("The dealer's face card is: {}", dealer_card);
+
+    play_turn(me, socket);
+
+    println!("Your turn has ended.");
+
+    let end_turn_req = BlackjackRequest {
+        command: RequestCommand::EndTurn(me.clone()),
     };
 
-    let mut players = vec![me];
-
-    loop {
-        match players.iter().find(|p| p.chips > 0) {
-            Some(_i) => start_round(&mut deck, &mut players, &mut dealer),
-            None => break,
-        }
-    }
-
-    println!("You are all out of chips, game over!")
+    send_request(end_turn_req, socket);
 }
 
-fn start_round(deck: &mut Vec<Card>, players: &mut Vec<Player>, dealer: &mut Player) {
-    for n in 0..players.len() {
-        players[n].current_bet = bet(players[n].chips);
-        // Technically out of sequence but it doesn't really matter.
-        players[n].hand = draw_cards(deck, 2)
-    }
+fn play_turn<S>(player: &mut Player, socket: &mut WebSocket<S>)
+where
+    S: Read + Write,
+{
+    let mut can_take_action = true;
 
-    dealer.hand = draw_cards(deck, 2);
+    while can_take_action {
+        println!("\nWhat action would you like to take? (Hit, Stand, Double or Split)");
+        let action = get_player_action();
 
-    for n in 0..players.len() {
-        println!("Your hand is: ");
-        print_cards_in_hand(players[n].hand.to_vec(), 2);
-        players[n].hand_value = get_hand_value(players[n].hand.to_owned());
-        println!("\n{}", players[n].hand_value)
-    }
-
-    println!("\nThe dealer's face card is: ");
-    print_cards_in_hand(dealer.hand.to_vec(), 1);
-
-    play_round(deck, players, dealer)
-}
-
-fn play_round(deck: &mut Vec<Card>, players: &mut Vec<Player>, dealer: &mut Player) {
-    for i in 0..players.len() {
-        let mut can_take_action = true;
-
-        while can_take_action {
-            println!("\nWhat action would you like to take? (Hit, Stand, Double or Split)");
-            let action = get_player_action();
-
-            match action {
-                PlayerAction::Hit => {
-                    let drawn_card = draw_cards(deck, 1)[0].to_owned();
-                    println!("You drew: ");
-                    println!("{}", drawn_card.to_string());
-                    players[i].hand.push(drawn_card);
-                }
-                PlayerAction::Stand => can_take_action = false,
-                PlayerAction::Double => {
-                    if players[i].current_bet * 2 > players[i].chips {
-                        println!("You don't have the chips to double up.");
-                        continue;
-                    }
-
-                    let drawn_card = draw_cards(deck, 1)[0].to_owned();
-                    println!("You drew: ");
-                    println!("{}", drawn_card.to_string());
-                    players[i].hand.push(drawn_card);
-                    players[i].current_bet *= 2;
-                    can_take_action = false;
-                }
+        match action {
+            PlayerAction::Hit => {
+                hit(player, socket);
             }
+            PlayerAction::Stand => {
+                can_take_action = false;
+            }
+            PlayerAction::Double => {
+                if player.current_bet * 2 > player.chips {
+                    println!("You don't have enough chips to double your bet!");
+                    continue;
+                }
 
-            players[i].hand_value = get_hand_value(players[i].hand.to_owned());
+                hit(player, socket);
 
-            println!("Your total hand value is: {}", players[i].hand_value);
+                player.current_bet *= 2;
+                send_request(
+                    BlackjackRequest {
+                        command: RequestCommand::Bet(player.current_bet),
+                    },
+                    socket,
+                );
 
-            if players[i].hand_value > 21 {
-                println!("You have bust! Better luck next time.");
-                can_take_action = false
+                can_take_action = false;
             }
         }
+        println!("Your hand is now: ");
+        print_cards_in_hand(player.hand.clone(), None);
+        println!();
+
+        player.hand_value = get_hand_value(player.hand.clone());
+        println!("Your hand value is: {}", player.hand_value);
+
+        if player.hand_value > 21 {
+            println!("You busted!");
+            can_take_action = false;
+        }
     }
-
-    take_dealers_turn(deck, dealer);
-
-    println!("The dealer's hand is: ");
-    print_cards_in_hand(dealer.hand.to_vec(), 0);
-
-    println!("\nThe dealer's score is {}", dealer.hand_value);
-
-    calculate_end_state(players, dealer)
 }
 
-fn calculate_end_state(players: &mut Vec<Player>, dealer: &mut Player) {
-    for i in 0..players.len() {
-        let player = &players[i];
-        let player_value = players[i].hand_value;
-        let dealer_value = dealer.hand_value;
-        let end_state: EndState;
+fn hit(player: &mut Player, socket: &mut WebSocket<impl Read + Write>) {
+    let req = BlackjackRequest {
+        command: RequestCommand::Hit,
+    };
 
-        if dealer_value > 21 && player_value > 21 || dealer.hand_value == player_value {
-            end_state = EndState::Push
-        } else if is_blackjack(&player) {
+    // TODO: Might want the card to be returned in the message.
+    send_request(req, socket);
+
+    let res = wait_for_message(socket);
+
+    let cards_drawn = handle_draw_cards(res.into_text().unwrap().as_str());
+
+    print!("You drew the following card(s): ");
+    print_cards_in_hand(cards_drawn.clone(), None);
+    println!();
+
+    player.hand.extend(cards_drawn);
+}
+
+pub fn handle_bets(player: &Player, end_state: &EndState, is_current_player: bool) {
+    let name = if is_current_player {
+        "You"
+    } else {
+        &player.user_name
+    };
+    match end_state {
+        EndState::Win => {
+            println!("{} won! Amount paid out: {}", name, player.current_bet);
+        }
+        EndState::Loss => {
+            println!("{} lost! Chips lost: {}", name, player.current_bet);
+        }
+        EndState::Blackjack => {
             println!(
-                "Wow you got blackjack! You won {} chips.",
+                "{} got a blackjack! Amount paid out: {}",
+                name,
                 player.current_bet * 3
             );
-            end_state = EndState::Blackjack;
-        } else if dealer_value > 21 || (player_value < 21 && player_value > dealer_value) {
-            println!("Congrats, you won {} chips.", player.current_bet);
-            end_state = EndState::Win;
-        } else {
-            println!("Unlucky, you lost {} chips.", player.current_bet);
-            end_state = EndState::Loss;
         }
-
-        handle_bets(&mut players[i], end_state);
+        EndState::Push => println!("{} and the dealer drew. Nothing paid out.", name), // Nothing to do on a push
     }
 }
 
-fn is_blackjack(player: &Player) -> bool {
-    player.hand.len() == 2 && player.hand_value == 21
-}
+fn handle_draw_cards(msg: &str) -> Vec<Card> {
+    let mut drawn_cards: Vec<Card> = vec![];
 
-fn handle_bets(player: &mut Player, end_state: EndState) {
-    match end_state {
-        EndState::Win => player.chips += player.current_bet,
-        EndState::Loss => player.chips -= player.current_bet,
-        EndState::Blackjack => player.chips += player.current_bet * 3,
-        EndState::Push => println!("You and the dealer drew. Nothing paid out."), // Nothing to do on a push
-    }
-}
-
-fn take_dealers_turn(deck: &mut Vec<Card>, dealer: &mut Player) {
-    dealer.hand_value = get_hand_value(dealer.hand.to_owned());
-
-    // Aways stand on >= 17
-    while dealer.hand_value < 17 {
-        let card = draw_cards(deck, 1)[0].to_owned();
-        dealer.hand.push(card);
-        dealer.hand_value = get_hand_value(dealer.hand.to_owned());
-    }
-}
-
-fn get_hand_value(hand: Vec<Card>) -> u32 {
-    let mut values = vec![];
-
-    for i in 0..hand.len() {
-        values.push(hand[i].rank.get_value());
-    }
-
-    let mut value = values.into_iter().sum();
-
-    if hand.into_iter().any(|c| c.rank == Rank::Ace) {
-        if value > 21 {
-            value -= 10;
+    if let Ok(res) = serde_json::from_str::<PublishRequest>(msg) {
+        if let PublishTrigger::CardsDrawn { cards } = res.trigger {
+            drawn_cards = cards;
         }
     }
 
-    value
+    drawn_cards
 }
 
-fn print_cards_in_hand(hand: Vec<Card>, mut num_to_show: usize) {
-    if num_to_show == 0 {
-        num_to_show = hand.len();
-    }
-    for n in 0..num_to_show {
-        print!("{}", hand[n])
-    }
-}
-
-enum EndState {
-    Win,
-    Loss,
-    Blackjack,
-    Push,
+pub fn print_cards_in_hand(hand: Vec<Card>, num_to_show: Option<usize>) {
+    let num = num_to_show.unwrap_or(hand.len());
+    (0..num).for_each(|n| print!("{} ", hand[n]));
 }
