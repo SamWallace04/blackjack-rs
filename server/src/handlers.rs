@@ -232,6 +232,7 @@ async fn handle_client_msg(
                     println!("No next client found, ending round.");
 
                     // Play the dealer's turn.
+                    // TODO: Broadcase the dealer's turn to all clients.
                     take_dealers_turn(&dealer).await;
 
                     // End the game.

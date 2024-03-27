@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
                 }
             }
             PublishTrigger::CardsDrawn { cards } => {
-                // TODO: Keep track of other players.
+                // TODO: The username does not populate for the none host player.
                 print!("{} drew the following card(s): ", current_player_name);
                 print_cards_in_hand(cards, None);
                 println!();
