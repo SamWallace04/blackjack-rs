@@ -18,3 +18,4 @@ jobs:
     - uses: actions/checkout@v3
     - name: Build
       run: cargo build --verbose --manifest-path ./client/Cargo.toml
+      run: cargo build --verbose --manifest-path ./server/Cargo.toml
