@@ -19,9 +19,19 @@ async fn main() -> Result<()> {
     println!("Please enter your username:");
     let my_user_name = get_user_input();
 
+    println!("Please enter the server url");
+    let mut url = get_user_input();
+
+    // Temp to make testing easier.
+    if url.is_empty() {
+        println!("Using default url.");
+        url = "http://127.0.0.1:8000".to_owned();
+    }
+
+    // TODO: Could add a room code to allow multiple games to be played at once.
     let http_client = reqwest::Client::new();
     let res_json = http_client
-        .post("http://127.0.0.1:8000/register")
+        .post(url + "/register")
         .json(&RegisterRequest {
             user_name: my_user_name.to_string(),
         })
@@ -70,7 +80,9 @@ async fn main() -> Result<()> {
     //Once a start message with our name has been send start playing the game.
     let mut current_player_name = String::new();
     loop {
-        // TODO: Better handle none publish messages.
+        // TODO: Better formatting of text. Could add colours or a library.
+        // TODO: Add testing.
+        // TODO: Try and limit cloning - change functions to borrow where possible.
         let message = wait_for_message(&mut socket);
         let request: PublishRequest = serde_json::from_str(message.into_text().unwrap().as_str())?;
 
@@ -92,7 +104,7 @@ async fn main() -> Result<()> {
                 }
             }
             PublishTrigger::CardsDrawn { cards } => {
-                // TODO: The username does not populate for the none host player.
+                // FIX: The username does not populate for the none host player.
                 print!("{} drew the following card(s): ", current_player_name);
                 print_cards_in_hand(cards, None);
                 println!();
