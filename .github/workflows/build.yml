@@ -15,6 +15,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Build
-        run-client: cargo build --verbose --manifest-path ./client/Cargo.toml
-        run-server: cargo build --verbose --manifest-path ./server/Cargo.toml
+      - name: build
+        run: cargo build --verbose --manifest-path ./client/Cargo.toml
+
+  build-server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: build
+        run: cargo build --verbose --manifest-path ./server/Cargo.toml
