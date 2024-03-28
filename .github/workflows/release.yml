@@ -4,7 +4,7 @@ on:
 
 jobs:
   release-client:
-    name: release client - ${{ matrix.target }}
+    name: release client ${{ matrix.target }}
     runs-on: ubuntu-latest
     if: github.event.release.tag_name == 'client'
     strategy:
@@ -28,7 +28,7 @@ jobs:
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
   release-server:
-    name: release server - ${{ matrix.target }}
+    name: release server ${{ matrix.target }}
     runs-on: ubuntu-latest
     if: github.event.release.tag_name == 'server'
     strategy:
