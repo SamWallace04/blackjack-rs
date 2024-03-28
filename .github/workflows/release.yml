@@ -6,7 +6,7 @@ jobs:
   release-client:
     name: release client ${{ matrix.target }}
     runs-on: ubuntu-latest
-    if: github.event.release.tag_name == 'client'
+    if: contains(github.event.release.tag_name, 'client')
     strategy:
       fail-fast: false
       matrix:
@@ -30,7 +30,7 @@ jobs:
   release-server:
     name: release server ${{ matrix.target }}
     runs-on: ubuntu-latest
-    if: github.event.release.tag_name == 'server'
+    if: contains(github.event.release.tag_name, 'server')
     strategy:
       fail-fast: false
       matrix:
